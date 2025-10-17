@@ -24,38 +24,90 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install selenium webdriver-manager
+
+      # Install Chrome and ChromeDriver
+      - name: Install Chrome and ChromeDriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          # Install ChromeDriver compatible with installed Chrome version
+          pip install chromedriver-autoinstaller
+          python -c "import chromedriver_autoinstaller; chromedriver_autoinstaller.install()"
 
       # Create and run the Python script
       - name: Create and run script to update playlist
         env:
           SONYLIV_URL: ${{ secrets.SONYLIV_URL }} # Store URL in GitHub Secrets
+          SONYLIV_COOKIES: ${{ secrets.SONYLIV_COOKIES }} # Optional: Store cookies for authentication
         run: |
           # Create Python script
           cat << 'EOF' > extract_hdnea.py
-          import requests
           import re
           import os
           import sys
+          import json
+          import time
+          from selenium import webdriver
+          from selenium.webdriver.chrome.service import Service
+          from webdriver_manager.chrome import ChromeDriverManager
+          from selenium.webdriver.chrome.options import Options
 
-          def fetch_mpd_url(sonyliv_url):
+          def setup_browser():
+              chrome_options = Options()
+              chrome_options.add_argument("--headless")
+              chrome_options.add_argument("--no-sandbox")
+              chrome_options.add_argument("--disable-dev-shm-usage")
+              chrome_options.add_argument("--disable-gpu")
+              chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+              
+              # Enable network logging
+              capabilities = {"goog:loggingPrefs": {"performance": "ALL"}}
+              driver = webdriver.Chrome(
+                  service=Service(ChromeDriverManager().install()),
+                  options=chrome_options,
+                  desired_capabilities=capabilities
+              )
+              return driver
+
+          def fetch_mpd_url(sonyliv_url, cookies=None):
               if not sonyliv_url:
                   print("Error: SONYLIV_URL is not set or is empty.")
                   return None
               if not sonyliv_url.startswith(('http://', 'https://')):
                   sonyliv_url = 'https://' + sonyliv_url
-              headers = {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-              }
+              
               try:
-                  response = requests.get(sonyliv_url, headers=headers, timeout=10)
-                  response.raise_for_status()
+                  driver = setup_browser()
+                  # Set cookies if provided
+                  if cookies:
+                      driver.get("https://www.sonyliv.com") # Load domain to set cookies
+                      for cookie in json.loads(cookies):
+                          driver.add_cookie(cookie)
+                  
+                  # Load the page
+                  driver.get(sonyliv_url)
+                  time.sleep(5) # Wait for dynamic content to load
+                  
+                  # Get network logs
+                  logs = driver.get_log("performance")
+                  mpd_url = None
                   mpd_pattern = r'https://securetoken\.sonyliv\.com/DASH/.*?\.mpd\?hdnea=.*?(&|$|\")'
-                  mpd_match = re.search(mpd_pattern, response.text)
-                  if mpd_match:
-                      return mpd_match.group(0).rstrip('&"')
+                  
+                  for entry in logs:
+                      log = json.loads(entry["message"])["message"]
+                      if log["method"] == "Network.requestWillBeSent":
+                          url = log["params"]["request"]["url"]
+                          if re.search(mpd_pattern, url):
+                              mpd_url = re.search(mpd_pattern, url).group(0).rstrip('&"')
+                              break
+                  
+                  driver.quit()
+                  if mpd_url:
+                      print(f"Found MPD URL: {mpd_url}")
+                      return mpd_url
                   else:
-                      print("MPD URL not found in the page.")
+                      print("MPD URL not found in network logs.")
                       return None
               except Exception as e:
                   print(f"Error fetching URL: {e}")
@@ -72,7 +124,7 @@ jobs:
 
           def update_playlist(hdnea_token, playlist_file="playlist.txt"):
               if hdnea_token:
-                  # Check for duplicates before appending
+                  # Check for duplicates
                   if os.path.exists(playlist_file):
                       with open(playlist_file, 'r') as f:
                           existing_tokens = f.read().splitlines()
@@ -87,10 +139,11 @@ jobs:
 
           def main():
               sonyliv_url = os.getenv("SONYLIV_URL")
+              cookies = os.getenv("SONYLIV_COOKIES")
               if not sonyliv_url:
                   print("Error: SONYLIV_URL environment variable is not set. Please set it in GitHub Secrets.")
                   sys.exit(1)
-              mpd_url = fetch_mpd_url(sonyliv_url)
+              mpd_url = fetch_mpd_url(sonyliv_url, cookies)
               if not mpd_url:
                   print("Exiting due to MPD URL fetch failure.")
                   sys.exit(1)
