@@ -3,7 +3,7 @@ name: Update Playlist with hdnea Token
 on:
   workflow_dispatch: # Allows manual triggering
   schedule:
-    - cron: '0 */6 * * *' # Runs every 6 hours (at 0th minute of 0, 6, 12, 18 hours UTC)
+    - cron: '0 */6 * * *' # Runs every 6 hours (0, 6, 12, 18 hours UTC)
 
 jobs:
   update-playlist:
@@ -36,13 +36,19 @@ jobs:
           import requests
           import re
           import os
+          import sys
 
           def fetch_mpd_url(sonyliv_url):
+              if not sonyliv_url:
+                  print("Error: SONYLIV_URL is not set or is empty.")
+                  return None
+              if not sonyliv_url.startswith(('http://', 'https://')):
+                  sonyliv_url = 'https://' + sonyliv_url
               headers = {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
               }
               try:
-                  response = requests.get(sonyliv_url, headers=headers)
+                  response = requests.get(sonyliv_url, headers=headers, timeout=10)
                   response.raise_for_status()
                   mpd_pattern = r'https://securetoken\.sonyliv\.com/DASH/.*?\.mpd\?hdnea=.*?(&|$|\")'
                   mpd_match = re.search(mpd_pattern, response.text)
@@ -56,6 +62,8 @@ jobs:
                   return None
 
           def extract_hdnea_token(mpd_url):
+              if not mpd_url:
+                  return None
               pattern = r'hdnea=.*?($|&)'
               match = re.search(pattern, mpd_url)
               if match:
@@ -64,6 +72,13 @@ jobs:
 
           def update_playlist(hdnea_token, playlist_file="playlist.txt"):
               if hdnea_token:
+                  # Check for duplicates before appending
+                  if os.path.exists(playlist_file):
+                      with open(playlist_file, 'r') as f:
+                          existing_tokens = f.read().splitlines()
+                      if hdnea_token in existing_tokens:
+                          print(f"Token already exists in playlist: {hdnea_token}")
+                          return
                   with open(playlist_file, 'a') as f:
                       f.write(hdnea_token + '\n')
                   print(f"Playlist updated with: {hdnea_token}")
@@ -71,11 +86,14 @@ jobs:
                   print("No hdnea token found.")
 
           def main():
-              sonyliv_url = os.getenv("SONYLIV_URL", "https://www.sonyliv.com/shows/the-kapil-sharma-show-1700000083/the-madness-returns-1000033058?watch=true")
+              sonyliv_url = os.getenv("SONYLIV_URL")
+              if not sonyliv_url:
+                  print("Error: SONYLIV_URL environment variable is not set. Please set it in GitHub Secrets.")
+                  sys.exit(1)
               mpd_url = fetch_mpd_url(sonyliv_url)
               if not mpd_url:
                   print("Exiting due to MPD URL fetch failure.")
-                  return
+                  sys.exit(1)
               hdnea_token = extract_hdnea_token(mpd_url)
               update_playlist(hdnea_token)
 
