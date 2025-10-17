@@ -1,0 +1,98 @@
+name: Update Playlist with hdnea Token
+
+on:
+  workflow_dispatch: # Allows manual triggering
+  schedule:
+    - cron: '0 */6 * * *' # Runs every 6 hours (at 0th minute of 0, 6, 12, 18 hours UTC)
+
+jobs:
+  update-playlist:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # Create and run the Python script
+      - name: Create and run script to update playlist
+        env:
+          SONYLIV_URL: ${{ secrets.SONYLIV_URL }} # Store URL in GitHub Secrets
+        run: |
+          # Create Python script
+          cat << 'EOF' > extract_hdnea.py
+          import requests
+          import re
+          import os
+
+          def fetch_mpd_url(sonyliv_url):
+              headers = {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+              }
+              try:
+                  response = requests.get(sonyliv_url, headers=headers)
+                  response.raise_for_status()
+                  mpd_pattern = r'https://securetoken\.sonyliv\.com/DASH/.*?\.mpd\?hdnea=.*?(&|$|\")'
+                  mpd_match = re.search(mpd_pattern, response.text)
+                  if mpd_match:
+                      return mpd_match.group(0).rstrip('&"')
+                  else:
+                      print("MPD URL not found in the page.")
+                      return None
+              except Exception as e:
+                  print(f"Error fetching URL: {e}")
+                  return None
+
+          def extract_hdnea_token(mpd_url):
+              pattern = r'hdnea=.*?($|&)'
+              match = re.search(pattern, mpd_url)
+              if match:
+                  return match.group(0).rstrip('&')
+              return None
+
+          def update_playlist(hdnea_token, playlist_file="playlist.txt"):
+              if hdnea_token:
+                  with open(playlist_file, 'a') as f:
+                      f.write(hdnea_token + '\n')
+                  print(f"Playlist updated with: {hdnea_token}")
+              else:
+                  print("No hdnea token found.")
+
+          def main():
+              sonyliv_url = os.getenv("SONYLIV_URL", "https://www.sonyliv.com/shows/the-kapil-sharma-show-1700000083/the-madness-returns-1000033058?watch=true")
+              mpd_url = fetch_mpd_url(sonyliv_url)
+              if not mpd_url:
+                  print("Exiting due to MPD URL fetch failure.")
+                  return
+              hdnea_token = extract_hdnea_token(mpd_url)
+              update_playlist(hdnea_token)
+
+          if __name__ == "__main__":
+              main()
+          EOF
+
+          # Run the Python script
+          python extract_hdnea.py
+
+      # Commit and push changes to playlist.txt
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add playlist.txt
+          git commit -m "Update playlist with new hdnea token" || echo "No changes to commit"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
