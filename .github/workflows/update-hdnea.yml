@@ -20,11 +20,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install requests
         run: |
           python -m pip install --upgrade pip
-          pip install playwright
-          playwright install chromium
+          pip install requests
 
       - name: Update HDNEA token and commit
         run: |
@@ -32,35 +31,48 @@ jobs:
           import re
           import sys
           import json
+          import requests
           from pathlib import Path
-          from playwright.sync_api import sync_playwright
 
           def fetch_hdnea_token(video_url):
+              headers = {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                  'Referer': 'https://www.sonyliv.com/',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Accept-Encoding': 'gzip, deflate, br',
+                  'Connection': 'keep-alive',
+                  'DNT': '1',
+                  'Upgrade-Insecure-Requests': '1'
+              }
               try:
-                  with sync_playwright() as p:
-                      browser = p.chromium.launch(headless=True)
-                      context = browser.new_context(
-                          user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-                      )
-                      page = context.new_page()
-                      page.goto('https://www.sonyliv.com/', timeout=30000)
-                      page.wait_for_timeout(2000)  # Wait for potential session cookies
-                      page.goto(video_url, timeout=30000)
-                      cookies = context.cookies()
-                      hdnea_value = None
-                      for cookie in cookies:
-                          if 'hdnea' in cookie['name'].lower():
-                              hdnea_value = cookie['value']
-                              break
-                      browser.close()
-                      if not hdnea_value:
-                          print('Error: HDNEA cookie not found!')
-                          print('Cookies received:', cookies)
-                          sys.exit(1)
-                      return f'hdnea={hdnea_value}'
+                  session = requests.Session()
+                  response = session.get(video_url, headers=headers, allow_redirects=True, timeout=10)
+                  response.raise_for_status()
+                  content = response.text.strip()
+                  if not content:
+                      print('Error: Empty response from SonyLIV!')
+                      sys.exit(1)
+                  try:
+                      data = json.loads(content)
+                  except json.JSONDecodeError as e:
+                      print(f'Error: Invalid JSON response: {e}')
+                      print('Response preview:', content[:100])
+                      sys.exit(1)                  
+                  if data.get('resultCode') != 'OK' or 'resultObj' not in data or 'videoURL' not in data['resultObj']:
+                      print('Error: Invalid API response structure!')
+                      print('Response:', json.dumps(data, indent=2)[:200])
+                      sys.exit(1)
+                  video_url = data['resultObj']['videoURL']
+                  hdnea_match = re.search(r'hdnea=([^&\s]+)', video_url)
+                  if not hdnea_match:
+                      print('Error: HDNEA token not found in videoURL!')
+                      print('VideoURL:', video_url[:100])
+                      sys.exit(1)
+                  return f'hdnea={hdnea_match.group(1)}'
               except Exception as e:
                   print(f'Error fetching token: {e}')
-                  print('Ensure the API URL is valid and accessible.')
+                  print('Ensure the API URL is valid and accessible without authentication.')
                   sys.exit(1)
 
           def update_json_playlist(playlist_file, new_hdnea):
@@ -90,7 +102,7 @@ jobs:
                   json.dump(cleaned_playlists, f, indent=4, ensure_ascii=False)
               print(f'Successfully updated playlist: {playlist_file}')
 
-          new_hdnea = fetch_hdnea_token('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview')
+          new_hdnea = fetch_hdnea_token('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview?contactId=66589316')
           print(f'Fetched HDNEA: {new_hdnea[:50]}...')
           update_json_playlist('Slivcdn.json', new_hdnea)
           "
