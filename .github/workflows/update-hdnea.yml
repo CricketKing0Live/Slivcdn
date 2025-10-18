@@ -76,14 +76,19 @@ jobs:
                       print(f'Error: Invalid JSON format in {playlist_file}: {e}')
                       sys.exit(1)
               playlists = data if isinstance(data, list) else [data]
+              cleaned_playlists = []
               for playlist in playlists:
                   if 'link' in playlist:
                       old_url = playlist['link']
                       old_pattern = r'(https?://[^&\s]+?\.m3u8)\?[^&\s]*hdnea=[^&\s]*'
                       new_url = re.sub(old_pattern, r'\1?' + new_hdnea, old_url, flags=re.IGNORECASE)
-                      playlist['link'] = new_url
+                      cleaned_playlists.append({
+                          'logo': playlist.get('logo', ''),
+                          'name': playlist.get('name', ''),
+                          'link': new_url
+                      })
               with playlist_path.open('w', encoding='utf-8') as f:
-                  json.dump(data, f, indent=4, ensure_ascii=False)
+                  json.dump(cleaned_playlists, f, indent=4, ensure_ascii=False)
               print(f'Successfully updated playlist: {playlist_file}')
 
           new_hdnea = fetch_hdnea_token('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview')
