@@ -1,109 +1,106 @@
-name: Update SonyLIV HDNEA Token
+name: Update Slivcdn Playlist
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # Runs every 3 hours
-  workflow_dispatch: # Allows manual trigger
+    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 0:00, 3:00, 6:00, 9:00, etc. UTC)
+  workflow_dispatch: # Allows manual triggering
 
 jobs:
   update-playlist:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # Checkout the repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.x'
 
-      - name: Install requests and urllib3
+      # Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests urllib3
+          pip install requests
 
-      - name: Update HDNEA token and commit
+      # Fetch hdnea cookie and update Slivcdn.json
+      - name: Fetch hdnea Cookie and Update Slivcdn.json
         run: |
-          python -c "
-          import re
-          import sys
-          import json
+          python - <<EOF
           import requests
-          from pathlib import Path
-          from requests.adapters import HTTPAdapter
-          from urllib3.util.retry import Retry
+          import json
+          import re
 
-          def fetch_hdnea_token(video_url):
-              headers = {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-                  'Referer': 'https://www.sonyliv.com/',
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                  'Accept-Language': 'en-US,en;q=0.9',
-                  'Accept-Encoding': 'gzip, deflate, br',
-                  'Connection': 'keep-alive',
-                  'DNT': '1',
-                  'Upgrade-Insecure-Requests': '1'
+          # API URL
+          api_url = "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview"
+
+          # Headers to mimic browser
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+
+          # Fetch response with cookies
+          session = requests.Session()
+          response = session.get(api_url, headers=headers)
+          response.raise_for_status()  # Raise error for bad status codes
+
+          # Parse JSON response
+          data = response.json()
+
+          # Extract videoURL
+          video_url = data.get('resultObj', {}).get('videoURL', '')
+          if not video_url:
+              raise ValueError("No videoURL found in the API response")
+
+          # Extract hdnea cookie from videoURL
+          hdnea_match = re.search(r'hdnea=([^&]+)', video_url)
+          if not hdnea_match:
+              raise ValueError("No hdnea cookie found in videoURL")
+          hdnea_cookie = hdnea_match.group(1)
+
+          # Load existing playlist
+          playlist_file = 'Slivcdn.json'
+          try:
+              with open(playlist_file, 'r') as f:
+                  playlist = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              # Initialize with default structure if file doesn't exist
+              playlist = {
+                  "logo": "https://origin-staticv2.sonyliv.com/videoasset_images/sethd_23oct_landscape_thumb_rev.jpg",
+                  "name": "Sony SET HD",
+                  "link": "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"
               }
-              try:
-                  session = requests.Session()
-                  # Add retry logic
-                  retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
-                  session.mount('https://', HTTPAdapter(max_retries=retries))
-                  response = session.get(video_url, headers=headers, allow_redirects=True, timeout=30)
-                  response.raise_for_status()
-                  content = response.text.strip()
-                  if not content:
-                      print('Error: Empty response from SonyLIV!')
-                      sys.exit(1)
-                  hdnea_match = re.search(r'hdnea=([^&\s]+)', content)
-                  if not hdnea_match:
-                      print('Error: HDNEA token not found in response!')
-                      print('Response preview:', content[:100])
-                      sys.exit(1)
-                  return f'hdnea={hdnea_match.group(1)}'
-              except requests.exceptions.ReadTimeout as e:
-                  print(f'Timeout error fetching token: {e}')
-                  print('The SonyLIV API took too long to respond. Consider checking the API URL or network conditions.')
-                  sys.exit(1)
-              except requests.exceptions.RequestException as e:
-                  print(f'Error fetching token: {e}')
-                  print('Ensure the API URL is valid and accessible without authentication.')
-                  sys.exit(1)
 
-          def update_json_playlist(playlist_file, new_hdnea):
-              playlist_path = Path(playlist_file)
-              if not playlist_path.exists():
-                  print(f'Error: Playlist file not found: {playlist_file}')
-                  sys.exit(1)
-              with playlist_path.open('r', encoding='utf-8') as f:
-                  try:
-                      data = json.load(f)
-                  except json.JSONDecodeError as e:
-                      print(f'Error: Invalid JSON format in {playlist_file}: {e}')
-                      sys.exit(1)
-              # Ensure data is a single object with expected keys
-              if not isinstance(data, dict) or 'link' not in data or 'name' not in data or 'logo' not in data:
-                  print(f'Error: Invalid JSON structure in {playlist_file}. Expected a single object with logo, name, and link.')
-                  sys.exit(1)
-              old_url = data['link']
-              old_pattern = r'(https?://[^&\s]+?\.m3u8)\?[^&\s]*hdnea=[^&\s]*'
-              new_url = re.sub(old_pattern, r'\1?' + new_hdnea, old_url, flags=re.IGNORECASE)
-              data['link'] = new_url
-              with playlist_path.open('w', encoding='utf-8') as f:
-                  json.dump(data, f, indent=4, ensure_ascii=False)
-              print(f'Successfully updated playlist: {playlist_file}')
+          # Update only the hdnea cookie in the existing link
+          current_link = playlist.get('link', '')
+          base_url = "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"
+          if 'hdnea=' in current_link:
+              # Replace existing hdnea cookie
+              new_link = re.sub(r'hdnea=[^&]+', f'hdnea={hdnea_cookie}', current_link)
+          else:
+              # Append hdnea cookie to the base URL
+              new_link = f"{base_url}?hdnea={hdnea_cookie}"
 
-          new_hdnea = fetch_hdnea_token('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview')
-          print(f'Fetched HDNEA: {new_hdnea[:50]}...')
-          update_json_playlist('Slivcdn.json', new_hdnea)
-          "
-          git config --global user.name 'GitHub Action'
-          git config --global user.email 'action@github.com'
+          # Update playlist with new link
+          playlist['link'] = new_link
+
+          # Write updated playlist back to file
+          with open(playlist_file, 'w') as f:
+              json.dump(playlist, f, indent=2)
+          print(f"Updated Slivcdn.json with new hdnea cookie: {hdnea_cookie}")
+
+          EOF
+
+      # Commit and push changes
+      - name: Commit Changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add Slivcdn.json
-          git commit -m "Update Slivcdn.json with new HDNEA token $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          git commit -m "Update Slivcdn.json with new hdnea cookie" || echo "No changes to commit"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
