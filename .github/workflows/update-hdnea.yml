@@ -21,93 +21,65 @@ jobs:
           python-version: '3.10'
 
       - name: Install requests
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests
 
       - name: Update HDNEA token and commit
         run: |
           python -c "
-          import re
-          import sys
-          import json
-          import requests
+          import re, json, requests, sys
           from pathlib import Path
 
-          def fetch_hdnea_token(video_url):
+          def fetch_hdnea_token():
               headers = {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
                   'Referer': 'https://www.sonyliv.com/',
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                  'Accept-Language': 'en-US,en;q=0.9',
-                  'Accept-Encoding': 'gzip, deflate, br',
-                  'Connection': 'keep-alive',
-                  'DNT': '1',
-                  'Upgrade-Insecure-Requests': '1'
+                  'Accept': 'application/json'
               }
-              try:
-                  session = requests.Session()
-                  response = session.get(video_url, headers=headers, allow_redirects=True, timeout=10)
-                  response.raise_for_status()
-                  content = response.text.strip()
-                  if not content:
-                      print('Error: Empty response from SonyLIV!')
-                      sys.exit(1)
-                  try:
-                      data = json.loads(content)
-                  except json.JSONDecodeError as e:
-                      print(f'Error: Invalid JSON response: {e}')
-                      print('Response preview:', content[:100])
-                      sys.exit(1)                  
-                  if data.get('resultCode') != 'OK' or 'resultObj' not in data or 'videoURL' not in data['resultObj']:
-                      print('Error: Invalid API response structure!')
-                      print('Response:', json.dumps(data, indent=2)[:200])
-                      sys.exit(1)
-                  video_url = data['resultObj']['videoURL']
-                  hdnea_match = re.search(r'hdnea=([^&\s]+)', video_url)
-                  if not hdnea_match:
-                      print('Error: HDNEA token not found in videoURL!')
-                      print('VideoURL:', video_url[:100])
-                      sys.exit(1)
-                  return f'hdnea={hdnea_match.group(1)}'
-              except Exception as e:
-                  print(f'Error fetching token: {e}')
-                  print('Ensure the API URL is valid and accessible without authentication.')
+              session = requests.Session()
+              session.get('https://www.sonyliv.com/', headers=headers, timeout=10)
+              response = session.get('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview?contactId=66589316', headers=headers, timeout=10)
+              response.raise_for_status()
+              data = response.json()
+              if data.get('resultCode') != 'OK' or 'resultObj' not in data or 'videoURL' not in data['resultObj']:
+                  print('Error: Invalid API response!')
+                  print('Response:', json.dumps(data, indent=2)[:200])
                   sys.exit(1)
+              video_url = data['resultObj']['videoURL']
+              hdnea_match = re.search(r'hdnea=([^&\s]+)', video_url)
+              if not hdnea_match:
+                  print('Error: HDNEA token not found!')
+                  print('VideoURL:', video_url[:100])
+                  sys.exit(1)
+              return f'hdnea={hdnea_match.group(1)}'
 
-          def update_json_playlist(playlist_file, new_hdnea):
+          def update_json_playlist():
+              playlist_file = 'Slivcdn.json'
               playlist_path = Path(playlist_file)
               if not playlist_path.exists():
                   print(f'Error: Playlist file not found: {playlist_file}')
                   sys.exit(1)
               with playlist_path.open('r', encoding='utf-8') as f:
-                  try:
-                      data = json.load(f)
-                  except json.JSONDecodeError as e:
-                      print(f'Error: Invalid JSON format in {playlist_file}: {e}')
-                      sys.exit(1)
+                  data = json.load(f)
               playlists = data if isinstance(data, list) else [data]
+              new_hdnea = fetch_hdnea_token()
               cleaned_playlists = []
               for playlist in playlists:
                   if 'link' in playlist:
                       old_url = playlist['link']
-                      old_pattern = r'(https?://[^&\s]+?\.m3u8)\?[^&\s]*hdnea=[^&\s]*'
-                      new_url = re.sub(old_pattern, r'\1?' + new_hdnea, old_url, flags=re.IGNORECASE)
+                      new_url = re.sub(r'(https?://[^&\s]+?\.m3u8)\?[^&\s]*hdnea=[^&\s]*', r'\1?' + new_hdnea, old_url, flags=re.IGNORECASE)
                       cleaned_playlists.append({
                           'logo': playlist.get('logo', ''),
                           'name': playlist.get('name', ''),
                           'link': new_url
                       })
               with playlist_path.open('w', encoding='utf-8') as f:
-                  json.dump(cleaned_playlists, f, indent=4, ensure_ascii=False)
-              print(f'Successfully updated playlist: {playlist_file}')
+                  json.dump(cleaned_playlists, f, indent=4)
+              print(f'Updated playlist: {playlist_file}')
 
-          new_hdnea = fetch_hdnea_token('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview?contactId=66589316')
-          print(f'Fetched HDNEA: {new_hdnea[:50]}...')
-          update_json_playlist('Slivcdn.json', new_hdnea)
+          update_json_playlist()
           "
-          git config --global user.name 'GitHub Action'
-          git config --global user.email 'action@github.com'
+          git config user.name 'GitHub Action'
+          git config user.email 'action@github.com'
           git add Slivcdn.json
           git commit -m "Update Slivcdn.json with new HDNEA token $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           git push
