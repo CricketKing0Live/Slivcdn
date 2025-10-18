@@ -36,23 +36,30 @@ jobs:
               headers = {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
                   'Referer': 'https://www.sonyliv.com/',
-                  'Accept': '*/*'
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Accept-Encoding': 'gzip, deflate, br',
+                  'Connection': 'keep-alive',
+                  'DNT': '1',
+                  'Upgrade-Insecure-Requests': '1'
               }
               try:
-                  response = requests.get(video_url, headers=headers, timeout=10)
+                  session = requests.Session()
+                  response = session.get(video_url, headers=headers, allow_redirects=True, timeout=10)
                   response.raise_for_status()
-                  m3u8_url = response.text.strip()
-                  if not m3u8_url.startswith('https://'):
-                      print('Error: No valid m3u8 URL received from SonyLIV!')
+                  content = response.text.strip()
+                  if not content:
+                      print('Error: Empty response from SonyLIV!')
                       sys.exit(1)
-                  hdnea_match = re.search(r'hdnea=([^&\s]+)', m3u8_url)
+                  hdnea_match = re.search(r'hdnea=([^&\s]+)', content)
                   if not hdnea_match:
-                      print('Error: HDNEA token not found in m3u8 URL!')
+                      print('Error: HDNEA token not found in response!')
+                      print('Response preview:', content[:100])
                       sys.exit(1)
                   return f'hdnea={hdnea_match.group(1)}'
               except Exception as e:
                   print(f'Error fetching token: {e}')
-                  print('Ensure the API URL is valid and accessible.')
+                  print('Ensure the API URL is valid and accessible without authentication.')
                   sys.exit(1)
 
           def update_json_playlist(playlist_file, new_hdnea):
