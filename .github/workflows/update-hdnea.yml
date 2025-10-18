@@ -28,16 +28,19 @@ jobs:
 
       # Fetch hdnea cookie and update Slivcdn.json for all channels
       - name: Fetch hdnea Cookie and Update Slivcdn.json
+        env:
+          API_COOKIE: ${{ secrets.API_COOKIE }} # Optional: Add browser cookies here if 403 persists
         run: |
           python - <<EOF
           import requests
           import json
           import re
+          import os
 
           # API URL (fetches hdnea cookie)
           api_url = "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview"
 
-          # Headers to mimic browser (no auth/cookies needed based on test)
+          # Headers to mimic browser
           headers = {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
               'Accept': 'application/json, text/plain, */*',
@@ -46,6 +49,11 @@ jobs:
               'Origin': 'https://www.sonyliv.com'
           }
 
+          # Add browser cookies if provided (uncomment if 403 occurs)
+          api_cookie = os.getenv('API_COOKIE')
+          if api_cookie:
+              headers['Cookie'] = api_cookie
+
           # Fetch response
           session = requests.Session()
           try:
@@ -53,6 +61,7 @@ jobs:
               response.raise_for_status()  # Raise if 403 or other error
           except requests.exceptions.HTTPError as e:
               print(f"HTTP Error: {e}")
+              print("Tip: Add browser cookies via API_COOKIE secret if needed.")
               raise SystemExit(1)
 
           # Parse JSON response
@@ -76,36 +85,37 @@ jobs:
           hdnea_cookie = hdnea_match.group(1)
           print(f"Fetched hdnea cookie: {hdnea_cookie}")
 
-          # Load existing playlist (assume array of channels)
+          # Load existing playlist (must be array of channels; no default creation)
           playlist_file = 'Slivcdn.json'
           try:
               with open(playlist_file, 'r') as f:
                   playlist_data = json.load(f)
                   # Ensure it's a list (array of channels)
                   if isinstance(playlist_data, dict):
-                      playlist = [playlist_data]  # Convert single dict to list
+                      playlist = [playlist_data]  # Convert single dict to list if needed
                   elif isinstance(playlist_data, list):
                       playlist = playlist_data
                   else:
-                      raise ValueError("Invalid JSON structure")
+                      raise ValueError("Invalid JSON structure: Must be array or single object")
+              if not playlist:
+                  raise ValueError("Playlist is empty")
           except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-              print(f"Error loading playlist: {e}. Initializing with default.")
-              # Default single channel as array
-              playlist = [{
-                  "logo": "https://origin-staticv2.sonyliv.com/videoasset_images/sethd_23oct_landscape_thumb_rev.jpg",
-                  "name": "Sony SET HD",
-                  "link": "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"
-              }]
+              print(f"Error loading playlist: {e}. Skipping update (no default channel created).")
+              raise SystemExit(0)  # Exit 0 to allow commit step to run (no changes)
 
           # Update hdnea for each channel
           updated_count = 0
-          base_url_example = "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"  # Use this if no base in channel; otherwise, preserve per-channel base
           for channel in playlist:
               current_link = channel.get('link', '')
+              if not current_link:
+                  print(f"Warning: No link found for channel '{channel.get('name', 'Unknown')}'. Skipping.")
+                  continue
+              
+              # Extract base URL (before ?)
               if '?' in current_link:
-                  base_url = current_link.split('?')[0]  # Preserve per-channel base URL
+                  base_url = current_link.split('?')[0]
               else:
-                  base_url = base_url_example  # Fallback to default if no query params
+                  base_url = current_link  # Use as-is if no query params
               
               if 'hdnea=' in current_link:
                   # Replace existing hdnea
