@@ -49,16 +49,17 @@ jobs:
                   session = requests.Session()
                   response = session.get(video_url, headers=headers, allow_redirects=True, timeout=10)
                   response.raise_for_status()
-                  content = response.text.strip()
-                  if not content:
-                      print('Error: Empty response from SonyLIV!')
+                  cookies = session.cookies.get_dict()
+                  hdnea_value = None
+                  for key, value in cookies.items():
+                      if 'hdnea' in key.lower():
+                          hdnea_value = value
+                          break
+                  if not hdnea_value:
+                      print('Error: HDNEA cookie not found in response!')
+                      print('Cookies received:', cookies)
                       sys.exit(1)
-                  hdnea_match = re.search(r'hdnea=([^&\s]+)', content)
-                  if not hdnea_match:
-                      print('Error: HDNEA token not found in response!')
-                      print('Response preview:', content[:100])
-                      sys.exit(1)
-                  return f'hdnea={hdnea_match.group(1)}'
+                  return f'hdnea={hdnea_value}'
               except Exception as e:
                   print(f'Error fetching token: {e}')
                   print('Ensure the API URL is valid and accessible without authentication.')
