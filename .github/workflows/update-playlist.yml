@@ -1,169 +1,49 @@
-name: Update Playlist with hdnea Token
+name: Update SonyLIV HDNEA Token
 
 on:
-  workflow_dispatch: # Allows manual triggering
   schedule:
-    - cron: '0 */6 * * *' # Runs every 6 hours (0, 6, 12, 18 hours UTC)
+    - cron: '0 * * * *' # Runs every hour
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
   update-playlist:
     runs-on: ubuntu-latest
 
     steps:
-      # Check out the repository
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # Set up Python
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
-      # Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium webdriver-manager
+          pip install yt-dlp requests
 
-      # Install Chrome and ChromeDriver
-      - name: Install Chrome and ChromeDriver
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          # Install ChromeDriver compatible with installed Chrome version
-          pip install chromedriver-autoinstaller
-          python -c "import chromedriver_autoinstaller; chromedriver_autoinstaller.install()"
-
-      # Create and run the Python script
-      - name: Create and run script to update playlist
+      - name: Create cookies.txt from secret
         env:
-          SONYLIV_URL: ${{ secrets.SONYLIV_URL }} # Store URL in GitHub Secrets
-          SONYLIV_COOKIES: ${{ secrets.SONYLIV_COOKIES }} # Optional: Store cookies for authentication
+          COOKIES_CONTENT: ${{ secrets.COOKIES_CONTENT }}
         run: |
-          # Create Python script
-          cat << 'EOF' > extract_hdnea.py
-          import re
-          import os
-          import sys
-          import json
-          import time
-          from selenium import webdriver
-          from selenium.webdriver.chrome.service import Service
-          from webdriver_manager.chrome import ChromeDriverManager
-          from selenium.webdriver.chrome.options import Options
+          echo "$COOKIES_CONTENT" > cookies.txt
 
-          def setup_browser():
-              chrome_options = Options()
-              chrome_options.add_argument("--headless")
-              chrome_options.add_argument("--no-sandbox")
-              chrome_options.add_argument("--disable-dev-shm-usage")
-              chrome_options.add_argument("--disable-gpu")
-              chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-              
-              # Enable network logging
-              capabilities = {"goog:loggingPrefs": {"performance": "ALL"}}
-              driver = webdriver.Chrome(
-                  service=Service(ChromeDriverManager().install()),
-                  options=chrome_options,
-                  desired_capabilities=capabilities
-              )
-              return driver
-
-          def fetch_mpd_url(sonyliv_url, cookies=None):
-              if not sonyliv_url:
-                  print("Error: SONYLIV_URL is not set or is empty.")
-                  return None
-              if not sonyliv_url.startswith(('http://', 'https://')):
-                  sonyliv_url = 'https://' + sonyliv_url
-              
-              try:
-                  driver = setup_browser()
-                  # Set cookies if provided
-                  if cookies:
-                      driver.get("https://www.sonyliv.com") # Load domain to set cookies
-                      for cookie in json.loads(cookies):
-                          driver.add_cookie(cookie)
-                  
-                  # Load the page
-                  driver.get(sonyliv_url)
-                  time.sleep(5) # Wait for dynamic content to load
-                  
-                  # Get network logs
-                  logs = driver.get_log("performance")
-                  mpd_url = None
-                  mpd_pattern = r'https://securetoken\.sonyliv\.com/DASH/.*?\.mpd\?hdnea=.*?(&|$|\")'
-                  
-                  for entry in logs:
-                      log = json.loads(entry["message"])["message"]
-                      if log["method"] == "Network.requestWillBeSent":
-                          url = log["params"]["request"]["url"]
-                          if re.search(mpd_pattern, url):
-                              mpd_url = re.search(mpd_pattern, url).group(0).rstrip('&"')
-                              break
-                  
-                  driver.quit()
-                  if mpd_url:
-                      print(f"Found MPD URL: {mpd_url}")
-                      return mpd_url
-                  else:
-                      print("MPD URL not found in network logs.")
-                      return None
-              except Exception as e:
-                  print(f"Error fetching URL: {e}")
-                  return None
-
-          def extract_hdnea_token(mpd_url):
-              if not mpd_url:
-                  return None
-              pattern = r'hdnea=.*?($|&)'
-              match = re.search(pattern, mpd_url)
-              if match:
-                  return match.group(0).rstrip('&')
-              return None
-
-          def update_playlist(hdnea_token, playlist_file="playlist.txt"):
-              if hdnea_token:
-                  # Check for duplicates
-                  if os.path.exists(playlist_file):
-                      with open(playlist_file, 'r') as f:
-                          existing_tokens = f.read().splitlines()
-                      if hdnea_token in existing_tokens:
-                          print(f"Token already exists in playlist: {hdnea_token}")
-                          return
-                  with open(playlist_file, 'a') as f:
-                      f.write(hdnea_token + '\n')
-                  print(f"Playlist updated with: {hdnea_token}")
-              else:
-                  print("No hdnea token found.")
-
-          def main():
-              sonyliv_url = os.getenv("SONYLIV_URL")
-              cookies = os.getenv("SONYLIV_COOKIES")
-              if not sonyliv_url:
-                  print("Error: SONYLIV_URL environment variable is not set. Please set it in GitHub Secrets.")
-                  sys.exit(1)
-              mpd_url = fetch_mpd_url(sonyliv_url, cookies)
-              if not mpd_url:
-                  print("Exiting due to MPD URL fetch failure.")
-                  sys.exit(1)
-              hdnea_token = extract_hdnea_token(mpd_url)
-              update_playlist(hdnea_token)
-
-          if __name__ == "__main__":
-              main()
-          EOF
-
-          # Run the Python script
-          python extract_hdnea.py
-
-      # Commit and push changes to playlist.txt
-      - name: Commit changes
+      - name: Run HDNEA update script
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add playlist.txt
-          git commit -m "Update playlist with new hdnea token" || echo "No changes to commit"
+          python sonyliv_json_hdnea_updater.py "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview" "Slivcdn.json" --cookies cookies.txt
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add Slivcdn.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update Slivcdn.json with new HDNEA token"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up
+        if: always
+        run: |
+          rm -f cookies.txt
