@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -23,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Update HDNEA token
+      - name: Update HDNEA token and commit
         run: |
           python -c "
           import re
@@ -74,18 +76,12 @@ jobs:
                       print(f'Error: Invalid JSON format in {playlist_file}: {e}')
                       sys.exit(1)
               playlists = data if isinstance(data, list) else [data]
-              updated = False
               for playlist in playlists:
                   if 'link' in playlist:
                       old_url = playlist['link']
                       old_pattern = r'(https?://[^&\s]+?\.m3u8)\?[^&\s]*hdnea=[^&\s]*'
                       new_url = re.sub(old_pattern, r'\1?' + new_hdnea, old_url, flags=re.IGNORECASE)
-                      if new_url != old_url:
-                          playlist['link'] = new_url
-                          updated = True
-              if not updated:
-                  print('Warning: No hdnea params updated. Check playlist URLs.')
-                  sys.exit(1)
+                      playlist['link'] = new_url
               with playlist_path.open('w', encoding='utf-8') as f:
                   json.dump(data, f, indent=4, ensure_ascii=False)
               print(f'Successfully updated playlist: {playlist_file}')
@@ -94,3 +90,10 @@ jobs:
           print(f'Fetched HDNEA: {new_hdnea[:50]}...')
           update_json_playlist('Slivcdn.json', new_hdnea)
           "
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add Slivcdn.json
+          git commit -m "Update Slivcdn.json with new HDNEA token $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
