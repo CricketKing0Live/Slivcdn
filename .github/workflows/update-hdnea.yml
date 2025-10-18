@@ -43,7 +43,9 @@ jobs:
                           user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
                       )
                       page = context.new_page()
-                      page.goto(video_url)
+                      page.goto('https://www.sonyliv.com/', timeout=30000)
+                      page.wait_for_timeout(2000)  # Wait for potential session cookies
+                      page.goto(video_url, timeout=30000)
                       cookies = context.cookies()
                       hdnea_value = None
                       for cookie in cookies:
@@ -58,7 +60,7 @@ jobs:
                       return f'hdnea={hdnea_value}'
               except Exception as e:
                   print(f'Error fetching token: {e}')
-                  print('Ensure the API URL is valid and accessible without authentication.')
+                  print('Ensure the API URL is valid and accessible.')
                   sys.exit(1)
 
           def update_json_playlist(playlist_file, new_hdnea):
