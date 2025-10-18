@@ -65,9 +65,14 @@ jobs:
           playlist_file = 'Slivcdn.json'
           try:
               with open(playlist_file, 'r') as f:
-                  playlist = json.load(f)
+                  playlist_data = json.load(f)
+                  # If the JSON is a list, take the first dictionary; otherwise, use it directly
+                  if isinstance(playlist_data, list) and len(playlist_data) > 0:
+                      playlist = playlist_data[0]
+                  else:
+                      playlist = playlist_data
           except (FileNotFoundError, json.JSONDecodeError):
-              # Initialize with default structure if file doesn't exist
+              # Initialize with default structure if file doesn't exist or is invalid
               playlist = {
                   "logo": "https://origin-staticv2.sonyliv.com/videoasset_images/sethd_23oct_landscape_thumb_rev.jpg",
                   "name": "Sony SET HD",
@@ -87,7 +92,7 @@ jobs:
           # Update playlist with new link
           playlist['link'] = new_link
 
-          # Write updated playlist back to file
+          # Write updated playlist back to file as a single dictionary
           with open(playlist_file, 'w') as f:
               json.dump(playlist, f, indent=2)
           print(f"Updated Slivcdn.json with new hdnea cookie: {hdnea_cookie}")
