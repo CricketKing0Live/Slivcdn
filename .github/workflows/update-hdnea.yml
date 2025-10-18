@@ -26,41 +26,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # Fetch hdnea cookie and update Slivcdn.json
+      # Fetch hdnea cookie and update Slivcdn.json for all channels
       - name: Fetch hdnea Cookie and Update Slivcdn.json
-        env:
-          API_TOKEN: ${{ secrets.API_TOKEN }} # Store API token or cookie in GitHub Secrets
         run: |
           python - <<EOF
           import requests
           import json
           import re
 
-          # API URL
+          # API URL (fetches hdnea cookie)
           api_url = "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview"
 
-          # Headers to mimic browser
+          # Headers to mimic browser (no auth/cookies needed based on test)
           headers = {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
               'Accept': 'application/json, text/plain, */*',
               'Accept-Language': 'en-US,en;q=0.9',
               'Referer': 'https://www.sonyliv.com/',
               'Origin': 'https://www.sonyliv.com'
-              # Add Authorization or Cookie header if needed
           }
 
-          # Add API token or cookie if provided
-          api_token = "${{ secrets.API_TOKEN }}"
-          if api_token:
-              headers['Authorization'] = f'Bearer {api_token}'
-              # Alternatively, if the API uses cookies, uncomment the following:
-              # headers['Cookie'] = api_token
-
-          # Fetch response with cookies
+          # Fetch response
           session = requests.Session()
           try:
               response = session.get(api_url, headers=headers)
-              response.raise_for_status()  # Raise error for bad status codes
+              response.raise_for_status()  # Raise if 403 or other error
           except requests.exceptions.HTTPError as e:
               print(f"HTTP Error: {e}")
               raise SystemExit(1)
@@ -84,42 +74,54 @@ jobs:
               print("Error: No hdnea cookie found in videoURL")
               raise SystemExit(1)
           hdnea_cookie = hdnea_match.group(1)
+          print(f"Fetched hdnea cookie: {hdnea_cookie}")
 
-          # Load existing playlist
+          # Load existing playlist (assume array of channels)
           playlist_file = 'Slivcdn.json'
           try:
               with open(playlist_file, 'r') as f:
                   playlist_data = json.load(f)
-                  # If the JSON is a list, take the first dictionary; otherwise, use it directly
-                  if isinstance(playlist_data, list) and len(playlist_data) > 0:
-                      playlist = playlist_data[0]
-                  else:
+                  # Ensure it's a list (array of channels)
+                  if isinstance(playlist_data, dict):
+                      playlist = [playlist_data]  # Convert single dict to list
+                  elif isinstance(playlist_data, list):
                       playlist = playlist_data
-          except (FileNotFoundError, json.JSONDecodeError):
-              # Initialize with default structure if file doesn't exist or is invalid
-              playlist = {
+                  else:
+                      raise ValueError("Invalid JSON structure")
+          except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
+              print(f"Error loading playlist: {e}. Initializing with default.")
+              # Default single channel as array
+              playlist = [{
                   "logo": "https://origin-staticv2.sonyliv.com/videoasset_images/sethd_23oct_landscape_thumb_rev.jpg",
                   "name": "Sony SET HD",
                   "link": "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"
-              }
+              }]
 
-          # Update only the hdnea cookie in the existing link
-          current_link = playlist.get('link', '')
-          base_url = "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"
-          if 'hdnea=' in current_link:
-              # Replace existing hdnea cookie
-              new_link = re.sub(r'hdnea=[^&]+', f'hdnea={hdnea_cookie}', current_link)
-          else:
-              # Append hdnea cookie to the base URL
-              new_link = f"{base_url}?hdnea={hdnea_cookie}"
+          # Update hdnea for each channel
+          updated_count = 0
+          base_url_example = "https://dishmt.slivcdn.com/hls/live/2011671/SETHD/master.m3u8"  # Use this if no base in channel; otherwise, preserve per-channel base
+          for channel in playlist:
+              current_link = channel.get('link', '')
+              if '?' in current_link:
+                  base_url = current_link.split('?')[0]  # Preserve per-channel base URL
+              else:
+                  base_url = base_url_example  # Fallback to default if no query params
+              
+              if 'hdnea=' in current_link:
+                  # Replace existing hdnea
+                  new_link = re.sub(r'hdnea=[^&]+', f'hdnea={hdnea_cookie}', current_link)
+              else:
+                  # Append hdnea to base
+                  new_link = f"{base_url}?hdnea={hdnea_cookie}"
+              
+              channel['link'] = new_link
+              updated_count += 1
+              print(f"Updated channel '{channel.get('name', 'Unknown')}' with new hdnea")
 
-          # Update playlist with new link
-          playlist['link'] = new_link
-
-          # Write updated playlist back to file as a single dictionary
+          # Write updated playlist back as array
           with open(playlist_file, 'w') as f:
               json.dump(playlist, f, indent=2)
-          print(f"Updated Slivcdn.json with new hdnea cookie: {hdnea_cookie}")
+          print(f"Updated {updated_count} channels in Slivcdn.json with new hdnea cookie")
 
           EOF
 
@@ -129,7 +131,7 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add Slivcdn.json
-          git commit -m "Update Slivcdn.json with new hdnea cookie" || echo "No changes to commit"
+          git commit -m "Update hdnea cookies for all channels in Slivcdn.json" || echo "No changes to commit"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
