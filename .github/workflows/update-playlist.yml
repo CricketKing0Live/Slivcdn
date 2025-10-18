@@ -119,11 +119,16 @@ jobs:
         env:
           COOKIES_CONTENT: ${{ secrets.COOKIES_CONTENT }}
         run: |
+          if [ -z "$COOKIES_CONTENT" ]; then
+            echo "Error: COOKIES_CONTENT secret is not set"
+            exit 1
+          fi
           echo "$COOKIES_CONTENT" > cookies.txt
 
       - name: Run HDNEA update script
         run: |
           python sonyliv_json_hdnea_updater.py "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview" "Slivcdn.json" --cookies cookies.txt
+        continue-on-error: false
 
       - name: Commit and push changes
         run: |
