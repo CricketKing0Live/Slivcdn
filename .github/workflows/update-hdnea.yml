@@ -18,61 +18,53 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install yt-dlp
+      - name: Install requests
         run: |
           python -m pip install --upgrade pip
-          pip install yt-dlp
+          pip install requests
 
       - name: Update HDNEA token
         run: |
-          cat << 'EOF' > update_hdnea.py
-          #!/usr/bin/env python3
-          # -*- coding: utf-8 -*-
-          """
-          SonyLIV HDNEA Token Updater for JSON Playlist
-          - Fetches hdnea token directly from SonyLIV API URL (no cookies).
-          - Updates hdnea in Slivcdn.json.
-          - For educational purposes only.
-          """
+          python -c "
           import re
           import sys
           import json
+          import requests
           from pathlib import Path
-          import yt_dlp
 
           def fetch_hdnea_token(video_url):
-              ydl_opts = {
-                  'quiet': True,
-                  'no_warnings': True,
-                  'extract_flat': True,
+              headers = {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                  'Referer': 'https://www.sonyliv.com/',
+                  'Accept': '*/*'
               }
-              with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                  try:
-                      info = ydl.extract_info(video_url, download=False)
-                      if 'url' not in info:
-                          print("Error: No m3u8 URL extracted from SonyLIV!")
-                          sys.exit(1)
-                      m3u8_url = info['url']
-                      hdnea_match = re.search(r'hdnea=([^&\s]+)', m3u8_url)
-                      if not hdnea_match:
-                          print("Error: HDNEA token not found in m3u8 URL!")
-                          sys.exit(1)
-                      return f"hdnea={hdnea_match.group(1)}"
-                  except Exception as e:
-                      print(f"Error fetching token: {e}")
-                      print("Ensure the API URL is valid and accessible.")
+              try:
+                  response = requests.get(video_url, headers=headers, timeout=10)
+                  response.raise_for_status()
+                  m3u8_url = response.text.strip()
+                  if not m3u8_url.startswith('https://'):
+                      print('Error: No valid m3u8 URL received from SonyLIV!')
                       sys.exit(1)
+                  hdnea_match = re.search(r'hdnea=([^&\s]+)', m3u8_url)
+                  if not hdnea_match:
+                      print('Error: HDNEA token not found in m3u8 URL!')
+                      sys.exit(1)
+                  return f'hdnea={hdnea_match.group(1)}'
+              except Exception as e:
+                  print(f'Error fetching token: {e}')
+                  print('Ensure the API URL is valid and accessible.')
+                  sys.exit(1)
 
           def update_json_playlist(playlist_file, new_hdnea):
               playlist_path = Path(playlist_file)
               if not playlist_path.exists():
-                  print(f"Error: Playlist file not found: {playlist_file}")
+                  print(f'Error: Playlist file not found: {playlist_file}')
                   sys.exit(1)
               with playlist_path.open('r', encoding='utf-8') as f:
                   try:
                       data = json.load(f)
                   except json.JSONDecodeError as e:
-                      print(f"Error: Invalid JSON format in {playlist_file}: {e}")
+                      print(f'Error: Invalid JSON format in {playlist_file}: {e}')
                       sys.exit(1)
               playlists = data if isinstance(data, list) else [data]
               updated = False
@@ -85,15 +77,13 @@ jobs:
                           playlist['link'] = new_url
                           updated = True
               if not updated:
-                  print("Warning: No hdnea params updated. Check playlist URLs.")
+                  print('Warning: No hdnea params updated. Check playlist URLs.')
                   sys.exit(1)
               with playlist_path.open('w', encoding='utf-8') as f:
                   json.dump(data, f, indent=4, ensure_ascii=False)
-              print(f"Successfully updated playlist: {playlist_file}")
+              print(f'Successfully updated playlist: {playlist_file}')
 
-          if __name__ == "__main__":
-              new_hdnea = fetch_hdnea_token("https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview")
-              print(f"Fetched HDNEA: {new_hdnea[:50]}...")
-              update_json_playlist("Slivcdn.json", new_hdnea)
-          EOF
-          python update_hdnea.py
+          new_hdnea = fetch_hdnea_token('https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview')
+          print(f'Fetched HDNEA: {new_hdnea[:50]}...')
+          update_json_playlist('Slivcdn.json', new_hdnea)
+          "
