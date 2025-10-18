@@ -2,7 +2,7 @@ name: Update Slivcdn Playlist
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 2:30 PM, 5:30 PM, 8:30 PM, 11:30 PM IST)
+    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 5:30 PM, 8:30 PM, 11:30 PM, 2:30 AM IST)
   workflow_dispatch: # Allows manual triggering
 
 jobs:
@@ -29,18 +29,19 @@ jobs:
       # Fetch hdnea cookie and update Slivcdn.json for all channels
       - name: Fetch hdnea Cookie and Update Slivcdn.json
         env:
-          API_COOKIE: ${{ secrets.API_COOKIE }} # Optional: Add browser cookies if needed
+          API_COOKIE: ${{ secrets.API_COOKIE }} # Optional: Add browser cookies if 403 occurs
         run: |
           python - <<EOF
           import requests
           import json
           import re
           import os
+          from time import sleep
 
           # API URL
           api_url = "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview"
 
-          # Headers to closely mimic Chrome browser
+          # Headers to mimic Chrome
           headers = {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
               'Accept': 'application/json, text/plain, */*',
@@ -58,21 +59,26 @@ jobs:
               'Sec-Ch-Ua-Platform': '"Windows"'
           }
 
-          # Add browser cookies if provided (for 403 error)
+          # Add browser cookies if provided
           api_cookie = os.getenv('API_COOKIE')
           if api_cookie:
               headers['Cookie'] = api_cookie
               print("Using provided cookies from API_COOKIE")
 
-          # Fetch response
+          # Fetch response with retries
           session = requests.Session()
-          try:
-              response = session.get(api_url, headers=headers)
-              response.raise_for_status()  # Raise if 403 or other error
-          except requests.exceptions.HTTPError as e:
-              print(f"HTTP Error: {e}")
-              print("Tip: If 403 persists, add browser cookies via API_COOKIE secret or check server restrictions.")
-              raise SystemExit(1)
+          max_retries = 3
+          for attempt in range(max_retries):
+              try:
+                  response = session.get(api_url, headers=headers, timeout=10)
+                  response.raise_for_status()
+                  break
+              except requests.exceptions.RequestException as e:
+                  print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+                  if attempt + 1 == max_retries:
+                      print("Error: Failed to fetch API. Check API_COOKIE or server restrictions.")
+                      raise SystemExit(1)
+                  sleep(2)
 
           # Parse JSON response
           try:
@@ -87,7 +93,7 @@ jobs:
               print("Error: No videoURL found in the API response")
               raise SystemExit(1)
 
-          # Extract hdnea cookie from videoURL
+          # Extract hdnea cookie
           hdnea_match = re.search(r'hdnea=([^&]+)', video_url)
           if not hdnea_match:
               print("Error: No hdnea cookie found in videoURL")
@@ -95,14 +101,14 @@ jobs:
           hdnea_cookie = hdnea_match.group(1)
           print(f"Fetched hdnea cookie: {hdnea_cookie}")
 
-          # Load existing playlist (must be array of channels; no default creation)
+          # Load existing playlist (must be array of channels)
           playlist_file = 'Slivcdn.json'
           try:
               with open(playlist_file, 'r') as f:
                   playlist_data = json.load(f)
-                  # Ensure it's a list (array of channels)
                   if isinstance(playlist_data, dict):
-                      playlist = [playlist_data]  # Convert single dict to list
+                      playlist = [playlist_data]
+                      print("Converted single dictionary to array")
                   elif isinstance(playlist_data, list):
                       playlist = playlist_data
                   else:
@@ -110,8 +116,8 @@ jobs:
               if not playlist:
                   raise ValueError("Playlist is empty")
           except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-              print(f"Error loading playlist: {e}. Skipping update (no file created).")
-              raise SystemExit(0)  # Exit 0 to allow commit step
+              print(f"Error loading playlist: {e}. Skipping update.")
+              raise SystemExit(1)
 
           # Update hdnea for each channel
           updated_count = 0
@@ -120,28 +126,31 @@ jobs:
               if not current_link:
                   print(f"Warning: No link found for channel '{channel.get('name', 'Unknown')}'. Skipping.")
                   continue
-              
-              # Extract base URL (before ?)
+
+              # Extract base URL
               if '?' in current_link:
                   base_url = current_link.split('?')[0]
               else:
-                  base_url = current_link  # Use as-is if no query params
-              
+                  base_url = current_link
+
+              # Always update hdnea to ensure file changes every run
               if 'hdnea=' in current_link:
-                  # Replace existing hdnea
                   new_link = re.sub(r'hdnea=[^&]+', f'hdnea={hdnea_cookie}', current_link)
               else:
-                  # Append hdnea to base
                   new_link = f"{base_url}?hdnea={hdnea_cookie}"
-              
+
               channel['link'] = new_link
               updated_count += 1
               print(f"Updated channel '{channel.get('name', 'Unknown')}' with new hdnea")
 
-          # Write updated playlist back as array
-          with open(playlist_file, 'w') as f:
-              json.dump(playlist, f, indent=2)
-          print(f"Updated {updated_count} channels in Slivcdn.json with new hdnea cookie")
+          # Write updated playlist (always write to ensure update)
+          try:
+              with open(playlist_file, 'w') as f:
+                  json.dump(playlist, f, indent=2)
+              print(f"Updated {updated_count} channels in Slivcdn.json with new hdnea cookie")
+          except Exception as e:
+              print(f"Error writing to Slivcdn.json: {e}")
+              raise SystemExit(1)
 
           EOF
 
@@ -151,7 +160,7 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add Slivcdn.json
-          git commit -m "Update hdnea cookies for all channels in Slivcdn.json" || echo "No changes to commit"
+          git commit -m "Update hdnea cookies for channels in Slivcdn.json" || echo "No changes to commit"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
