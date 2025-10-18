@@ -2,7 +2,7 @@ name: Update Slivcdn Playlist
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 0:00, 3:00, 6:00, 9:00, etc. UTC)
+    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 0:00, 3:00, 6:00, 9:00 UTC; 5:30 AM, 8:30 AM, 11:30 AM, 2:30 PM IST)
   workflow_dispatch: # Allows manual triggering
 
 jobs:
@@ -28,6 +28,8 @@ jobs:
 
       # Fetch hdnea cookie and update Slivcdn.json
       - name: Fetch hdnea Cookie and Update Slivcdn.json
+        env:
+          API_TOKEN: ${{ secrets.API_TOKEN }} # Store API token or cookie in GitHub Secrets
         run: |
           python - <<EOF
           import requests
@@ -39,26 +41,48 @@ jobs:
 
           # Headers to mimic browser
           headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Referer': 'https://www.sonyliv.com/',
+              'Origin': 'https://www.sonyliv.com'
+              # Add Authorization or Cookie header if needed
           }
+
+          # Add API token or cookie if provided
+          api_token = "${{ secrets.API_TOKEN }}"
+          if api_token:
+              headers['Authorization'] = f'Bearer {api_token}'
+              # Alternatively, if the API uses cookies, uncomment the following:
+              # headers['Cookie'] = api_token
 
           # Fetch response with cookies
           session = requests.Session()
-          response = session.get(api_url, headers=headers)
-          response.raise_for_status()  # Raise error for bad status codes
+          try:
+              response = session.get(api_url, headers=headers)
+              response.raise_for_status()  # Raise error for bad status codes
+          except requests.exceptions.HTTPError as e:
+              print(f"HTTP Error: {e}")
+              raise SystemExit(1)
 
           # Parse JSON response
-          data = response.json()
+          try:
+              data = response.json()
+          except json.JSONDecodeError:
+              print("Error: Failed to parse JSON response from API")
+              raise SystemExit(1)
 
           # Extract videoURL
           video_url = data.get('resultObj', {}).get('videoURL', '')
           if not video_url:
-              raise ValueError("No videoURL found in the API response")
+              print("Error: No videoURL found in the API response")
+              raise SystemExit(1)
 
           # Extract hdnea cookie from videoURL
           hdnea_match = re.search(r'hdnea=([^&]+)', video_url)
           if not hdnea_match:
-              raise ValueError("No hdnea cookie found in videoURL")
+              print("Error: No hdnea cookie found in videoURL")
+              raise SystemExit(1)
           hdnea_cookie = hdnea_match.group(1)
 
           # Load existing playlist
