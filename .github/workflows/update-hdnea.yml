@@ -2,7 +2,7 @@ name: Update Slivcdn Playlist
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 0:00, 3:00, 6:00, 9:00 UTC; 5:30 AM, 8:30 AM, 11:30 AM, 2:30 PM IST)
+    - cron: '0 */3 * * *' # Runs every 3 hours (e.g., 2:30 PM, 5:30 PM, 8:30 PM, 11:30 PM IST)
   workflow_dispatch: # Allows manual triggering
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
       # Fetch hdnea cookie and update Slivcdn.json for all channels
       - name: Fetch hdnea Cookie and Update Slivcdn.json
         env:
-          API_COOKIE: ${{ secrets.API_COOKIE }} # Optional: Add browser cookies here if 403 persists
+          API_COOKIE: ${{ secrets.API_COOKIE }} # Optional: Add browser cookies if needed
         run: |
           python - <<EOF
           import requests
@@ -37,22 +37,32 @@ jobs:
           import re
           import os
 
-          # API URL (fetches hdnea cookie)
+          # API URL
           api_url = "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview"
 
-          # Headers to mimic browser
+          # Headers to closely mimic Chrome browser
           headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
               'Accept': 'application/json, text/plain, */*',
-              'Accept-Language': 'en-US,en;q=0.9',
+              'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+              'Accept-Encoding': 'gzip, deflate, br',
               'Referer': 'https://www.sonyliv.com/',
-              'Origin': 'https://www.sonyliv.com'
+              'Origin': 'https://www.sonyliv.com',
+              'Connection': 'keep-alive',
+              'Sec-Fetch-Dest': 'empty',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Site': 'cross-site',
+              'DNT': '1',
+              'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+              'Sec-Ch-Ua-Mobile': '?0',
+              'Sec-Ch-Ua-Platform': '"Windows"'
           }
 
-          # Add browser cookies if provided (uncomment if 403 occurs)
+          # Add browser cookies if provided (for 403 error)
           api_cookie = os.getenv('API_COOKIE')
           if api_cookie:
               headers['Cookie'] = api_cookie
+              print("Using provided cookies from API_COOKIE")
 
           # Fetch response
           session = requests.Session()
@@ -61,7 +71,7 @@ jobs:
               response.raise_for_status()  # Raise if 403 or other error
           except requests.exceptions.HTTPError as e:
               print(f"HTTP Error: {e}")
-              print("Tip: Add browser cookies via API_COOKIE secret if needed.")
+              print("Tip: If 403 persists, add browser cookies via API_COOKIE secret or check server restrictions.")
               raise SystemExit(1)
 
           # Parse JSON response
@@ -92,7 +102,7 @@ jobs:
                   playlist_data = json.load(f)
                   # Ensure it's a list (array of channels)
                   if isinstance(playlist_data, dict):
-                      playlist = [playlist_data]  # Convert single dict to list if needed
+                      playlist = [playlist_data]  # Convert single dict to list
                   elif isinstance(playlist_data, list):
                       playlist = playlist_data
                   else:
@@ -100,8 +110,8 @@ jobs:
               if not playlist:
                   raise ValueError("Playlist is empty")
           except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-              print(f"Error loading playlist: {e}. Skipping update (no default channel created).")
-              raise SystemExit(0)  # Exit 0 to allow commit step to run (no changes)
+              print(f"Error loading playlist: {e}. Skipping update (no file created).")
+              raise SystemExit(0)  # Exit 0 to allow commit step
 
           # Update hdnea for each channel
           updated_count = 0
