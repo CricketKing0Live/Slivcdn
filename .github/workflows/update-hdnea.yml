@@ -50,17 +50,17 @@ jobs:
                   try:
                       info = ydl.extract_info(video_url, download=False)
                       if 'url' not in info:
-                          print("Error: No URL extracted from SonyLIV!")
+                          print("Error: No m3u8 URL extracted from SonyLIV!")
                           sys.exit(1)
                       m3u8_url = info['url']
                       hdnea_match = re.search(r'hdnea=([^&\s]+)', m3u8_url)
                       if not hdnea_match:
-                          print("Error: HDNEA token not found in URL!")
+                          print("Error: HDNEA token not found in m3u8 URL!")
                           sys.exit(1)
                       return f"hdnea={hdnea_match.group(1)}"
                   except Exception as e:
                       print(f"Error fetching token: {e}")
-                      print("Check if the API URL is valid and accessible.")
+                      print("Ensure the API URL is valid and accessible without authentication.")
                       sys.exit(1)
 
           def update_json_playlist(playlist_file, new_hdnea):
@@ -72,7 +72,7 @@ jobs:
                   try:
                       data = json.load(f)
                   except json.JSONDecodeError as e:
-                      print(f"Error: Invalid JSON format: {e}")
+                      print(f"Error: Invalid JSON format in {playlist_file}: {e}")
                       sys.exit(1)
               playlists = data if isinstance(data, list) else [data]
               updated = False
@@ -85,11 +85,11 @@ jobs:
                           playlist['link'] = new_url
                           updated = True
               if not updated:
-                  print("No hdnea params updated. Check playlist URLs.")
+                  print("Warning: No hdnea params updated. Check if playlist URLs contain hdnea.")
                   sys.exit(1)
               with playlist_path.open('w', encoding='utf-8') as f:
                   json.dump(data, f, indent=4, ensure_ascii=False)
-              print(f"Playlist updated: {playlist_file}")
+              print(f"Successfully updated playlist: {playlist_file}")
 
           if __name__ == "__main__":
               import argparse
@@ -98,7 +98,7 @@ jobs:
               parser.add_argument("playlist_file", help="Path to JSON playlist file")
               args = parser.parse_args()
               new_hdnea = fetch_hdnea_token(args.video_url)
-              print(f"New HDNEA: {new_hdnea[:50]}...")
+              print(f"Fetched HDNEA: {new_hdnea[:50]}...")
               update_json_playlist(args.playlist_file, new_hdnea)
           EOF
 
