@@ -18,63 +18,61 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install yt-dlp
         run: |
           python -m pip install --upgrade pip
-          pip install yt-dlp requests
+          pip install yt-dlp
 
       - name: Create Python script
         run: |
-          cat << 'EOF' > sonyliv_json_hdnea_updater.py
+          cat << 'EOF' > update_hdnea.py
           #!/usr/bin/env python3
           # -*- coding: utf-8 -*-
           """
           SonyLIV HDNEA Token Updater for JSON Playlist
-          - Fetches fresh hdnea token using yt-dlp SonyLIV extractor.
-          - Updates JSON playlist (Slivcdn format) by replacing old hdnea params.
-          Author: Grok (inspired by yt-dlp SonyLIV extractor)
+          - Fetches hdnea token directly from SonyLIV API URL using yt-dlp (no cookies).
+          - Updates hdnea in Slivcdn.json.
+          - For educational purposes only.
           """
           import re
           import sys
           import json
-          import argparse
           from pathlib import Path
           import yt_dlp
 
-          def fetch_hdnea_token(video_url, cookies_file=None):
+          def fetch_hdnea_token(video_url):
               ydl_opts = {
                   'quiet': True,
                   'no_warnings': True,
                   'extract_flat': True,
-                  'cookiefile': cookies_file,
               }
               with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                   try:
                       info = ydl.extract_info(video_url, download=False)
-                      if 'url' in info:
-                          m3u8_url = info['url']
-                          hdnea_match = re.search(r'hdnea=([^&\s]+)', m3u8_url)
-                          if hdnea_match:
-                              return f"hdnea={hdnea_match.group(1)}"
-                          else:
-                              raise ValueError("HDNEA token not found in URL!")
-                      else:
-                          raise ValueError("No URL extracted from SonyLIV!")
+                      if 'url' not in info:
+                          print("Error: No URL extracted from SonyLIV!")
+                          sys.exit(1)
+                      m3u8_url = info['url']
+                      hdnea_match = re.search(r'hdnea=([^&\s]+)', m3u8_url)
+                      if not hdnea_match:
+                          print("Error: HDNEA token not found in URL!")
+                          sys.exit(1)
+                      return f"hdnea={hdnea_match.group(1)}"
                   except Exception as e:
                       print(f"Error fetching token: {e}")
-                      print("Check cookies.txt and video URL. Ensure logged in.")
+                      print("Check if the API URL is valid and accessible.")
                       sys.exit(1)
 
-          def update_json_playlist(playlist_file, new_hdnea, backup=True):
+          def update_json_playlist(playlist_file, new_hdnea):
               playlist_path = Path(playlist_file)
               if not playlist_path.exists():
-                  print(f"Playlist file not found: {playlist_file}")
+                  print(f"Error: Playlist file not found: {playlist_file}")
                   sys.exit(1)
               with playlist_path.open('r', encoding='utf-8') as f:
                   try:
                       data = json.load(f)
                   except json.JSONDecodeError as e:
-                      print(f"Invalid JSON format: {e}")
+                      print(f"Error: Invalid JSON format: {e}")
                       sys.exit(1)
               playlists = data if isinstance(data, list) else [data]
               updated = False
@@ -87,60 +85,42 @@ jobs:
                           playlist['link'] = new_url
                           updated = True
               if not updated:
-                  print("No hdnea params found to update. Check your playlist URLs.")
-                  return
-              if backup:
-                  backup_path = playlist_path.with_suffix('.json.bak')
-                  playlist_path.rename(backup_path)
-                  print(f"Backup saved: {backup_path}")
+                  print("No hdnea params updated. Check playlist URLs.")
+                  sys.exit(1)
               with playlist_path.open('w', encoding='utf-8') as f:
                   json.dump(data, f, indent=4, ensure_ascii=False)
-              print(f"Playlist updated with new hdnea: {playlist_file}")
-
-          def main():
-              parser = argparse.ArgumentParser(description="SonyLIV HDNEA Token Updater for JSON Playlist")
-              parser.add_argument("video_url", help="SonyLIV API URL")
-              parser.add_argument("playlist_file", help="Path to JSON playlist file")
-              parser.add_argument("--cookies", default="cookies.txt", help="Path to cookies.txt")
-              parser.add_argument("--no-backup", action="store_true", help="Don't create backup")
-              args = parser.parse_args()
-              print("Fetching fresh HDNEA token...")
-              new_hdnea = fetch_hdnea_token(args.video_url, args.cookies)
-              print(f"New HDNEA: {new_hdnea[:50]}...")
-              print("Updating JSON playlist...")
-              update_json_playlist(args.playlist_file, new_hdnea, not args.no_backup)
-              print("Done! Run again when token expires.")
+              print(f"Playlist updated: {playlist_file}")
 
           if __name__ == "__main__":
-              main()
+              import argparse
+              parser = argparse.ArgumentParser(description="SonyLIV HDNEA Token Updater")
+              parser.add_argument("video_url", help="SonyLIV API URL")
+              parser.add_argument("playlist_file", help="Path to JSON playlist file")
+              args = parser.parse_args()
+              new_hdnea = fetch_hdnea_token(args.video_url)
+              print(f"New HDNEA: {new_hdnea[:50]}...")
+              update_json_playlist(args.playlist_file, new_hdnea)
           EOF
-
-      - name: Create cookies.txt from secret
-        env:
-          COOKIES_CONTENT: ${{ secrets.COOKIES_CONTENT }}
-        run: |
-          if [ -z "$COOKIES_CONTENT" ]; then
-            echo "Error: COOKIES_CONTENT secret is not set"
-            exit 1
-          fi
-          echo "$COOKIES_CONTENT" > cookies.txt
 
       - name: Run HDNEA update script
         run: |
-          python sonyliv_json_hdnea_updater.py "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview" "Slivcdn.json" --cookies cookies.txt
-        continue-on-error: false
+          python update_hdnea.py "https://apiv4.sonyliv.com/AGL/4.7/R/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1090492435/freepreview" "Slivcdn.json"
 
       - name: Commit and push changes
         run: |
           git config --global user.name 'GitHub Action'
           git config --global user.email 'action@github.com'
           git add Slivcdn.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update Slivcdn.json with new HDNEA token"
-          git push
+          if ! git diff --quiet && ! git diff --staged --quiet; then
+            git commit -m "Update Slivcdn.json with new HDNEA token"
+            git push
+          else
+            echo "No changes to commit"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up
         if: always
         run: |
-          rm -f cookies.txt sonyliv_json_hdnea_updater.py
+          rm -f update_hdnea.py
